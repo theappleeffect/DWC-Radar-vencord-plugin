@@ -4,10 +4,7 @@ Vencord plugin that scans servers for staff-role members and collects their IDs 
 
 ## How it works
 
-When you join a new Discord server, the plugin automatically scans the server's roles and members after a short delay. It matches all server roles against a configurable list of keywords (e.g. Mod, Admin, Staff, Owner) and checks each cached member for:
-
-- **Role matches** — members who have roles with names containing any of the keywords.
-- **Display name matches** — members whose username or server nickname contains any of the keywords.
+When you join a new Discord server, the plugin automatically scans the server's roles and members after a short delay. It matches all server roles against a configurable list of keywords (e.g. Mod, Admin, Staff, Owner) and flags any cached member who holds a matching role.
 
 Detected staff members are saved to a persistent list that survives Discord restarts. A toast notification appears showing how many staff members were found — clicking it opens the DWC Radar modal.
 
@@ -71,6 +68,6 @@ pnpm inject
 
 ### Keywords
 
-Comma-separated list of keywords to match against role names and display names. Matching is case-insensitive and uses substring matching (e.g. "Mod" will match "Moderator").
+Comma-separated list of keywords to match against role names. Matching is case-insensitive and uses substring matching (e.g. "Mod" will match "Moderator", "Senior Mod", etc.).
 
-Default: `Mod,Moderation,Admin,Administrator,Manager,Owner,Helper,Jr. Staff,Staff,Head Staff,Sr. Staff,Senior Staff`
+Default: `Mod,Moderator,Moderation,Senior Moderator,Trial Mod,Admin,Administrator,Manager,Owner,Co-Owner,Helper,Staff,Jr. Staff,Sr. Staff,Head Staff,Senior Staff,Supervisor,Support,Trainee`

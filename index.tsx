@@ -14,7 +14,7 @@ const settings = definePluginSettings({
     keywords: {
         type: OptionType.STRING,
         description: "Comma-separated keywords to match against role names and display names",
-        default: "Mod,Moderation,Admin,Administrator,Manager,Owner,Helper,Jr. Staff,Staff,Head Staff,Sr. Staff,Senior Staff",
+        default: "Mod,Moderator,Moderation,Senior Moderator,Trial Mod,Admin,Administrator,Manager,Owner,Co-Owner,Helper,Staff,Jr. Staff,Sr. Staff,Head Staff,Senior Staff,Supervisor,Support,Trainee",
     },
 });
 

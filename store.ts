@@ -97,7 +97,6 @@ function checkMember(
     member: { user?: any; roles?: string[]; nick?: string; },
     guildId: string,
     guildName: string,
-    keywords: string[],
     staffRoleIds: Set<string>,
     roleIdToName: Map<string, string>,
 ): boolean {
@@ -115,19 +114,15 @@ function checkMember(
         }
     }
 
-    const nickname = member.nick;
-    const username = member.user?.username;
-
-    if (nickname && matchesKeyword(nickname, keywords)) matched = true;
-    if (username && matchesKeyword(username, keywords)) matched = true;
-
     if (matched) {
+        const nickname = member.nick;
+        const username = member.user?.username;
         return addStaffEntry({
             userId,
             username: nickname || username || undefined,
             guildId,
             guildName,
-            roles: matchedRoles.length > 0 ? matchedRoles : undefined,
+            roles: matchedRoles,
         });
     }
 
@@ -175,7 +170,7 @@ export function scanGuild(guildId: string, guildName: string, keywords: string[]
                 nick: cachedMember.nick,
             };
 
-            if (checkMember(member, guildId, guildName, keywords, staffRoleIds, roleIdToName)) {
+            if (checkMember(member, guildId, guildName, staffRoleIds, roleIdToName)) {
                 newCount++;
             }
         }

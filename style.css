@@ -1,3 +1,8 @@
+#vc-notification-container .vc-notification-root {
+    transform: scale(0.7);
+    transform-origin: top right;
+}
+
 .vc-dwcradar-header {
     gap: 12px;
 }

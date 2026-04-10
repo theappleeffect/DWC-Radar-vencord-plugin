@@ -1,9 +1,11 @@
 import { addChatBarButton, ChatBarButton, ChatBarButtonFactory, removeChatBarButton } from "@api/ChatButtons";
 import { ApplicationCommandInputType } from "@api/Commands";
+import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { Notifications } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { IconComponent, OptionType } from "@utils/types";
 import { openModal } from "@utils/modal";
+import { GuildStore, Menu, showToast, Toasts } from "@webpack/common";
 
 import { DWCRadarModal } from "./DWCRadarPanel";
 import { loadStoredEntries, parseKeywords, scanGuild } from "./store";
@@ -14,7 +16,7 @@ const settings = definePluginSettings({
     keywords: {
         type: OptionType.STRING,
         description: "Comma-separated keywords to match against role names and display names",
-        default: "Mod,Moderator,Moderation,Senior Moderator,Trial Mod,Admin,Administrator,Manager,Owner,Co-Owner,Helper,Staff,Jr. Staff,Sr. Staff,Head Staff,Senior Staff,Supervisor,Support,Trainee",
+        default: "Mod,Moderator,Moderation,Senior Moderator,Trial Mod,Admin,Administrator,Manager,Owner,Co-Owner,Helper,Staff,Jr. Staff,Sr. Staff,Head Staff,Senior Staff,Supervisor,Trainee",
     },
 });
 
@@ -42,6 +44,23 @@ const DWCRadarChatBarBtn: ChatBarButtonFactory = () => (
     </ChatBarButton>
 );
 
+const GuildContextMenuPatch: NavContextMenuPatchCallback = (children, { guild }: { guild: any; }) => {
+    if (!guild) return;
+
+    const group = findGroupChildrenByChildId("privacy", children);
+    group?.push(
+        <Menu.MenuItem
+            id="vc-dwcradar-scan"
+            label="Scan for Staff"
+            action={() => {
+                const keywords = parseKeywords(settings.store.keywords);
+                scanGuild(guild.id, guild.name, keywords);
+                openDWCRadarModal();
+            }}
+        />
+    );
+};
+
 export default definePlugin({
     name: "DWCRadar",
     description: "Scans servers for staff-role members and collects their IDs for DWC bulk actions",
@@ -49,6 +68,11 @@ export default definePlugin({
 
     settings,
     managedStyle: style,
+
+    contextMenus: {
+        "guild-context": GuildContextMenuPatch,
+        "guild-header-popout": GuildContextMenuPatch,
+    },
 
     commands: [{
         name: "dwcradar",
@@ -88,7 +112,7 @@ export default definePlugin({
                         onClick: openDWCRadarModal,
                     });
                 }
-            }, 2000);
+            }, 3000);
         },
     },
 });

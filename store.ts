@@ -14,6 +14,15 @@ export interface StaffEntry {
 const logger = new Logger("DWCRadar");
 const STORE_KEY = "DWCRadar_entries";
 
+const EXCLUDED_TERMS = [
+    "retired", "retirado", "retraité", "pensioniert", "ritirato", "gepensioneerd", "emekli",
+    "announcement", "anuncio", "annonce", "ankündigung", "annuncio", "aankondiging", "duyuru",
+    "tester", "probador", "testeur", "testador", "provatore", "penguji",
+    "bot",
+    "former", "ex-", "antiguo", "ancien", "ehemalig", "voormalig", "eski",
+    "ping",
+];
+
 let entries: StaffEntry[] = [];
 const listeners = new Set<() => void>();
 
@@ -147,7 +156,9 @@ export function scanGuild(guildId: string, guildName: string, keywords: string[]
 
         const allRoles = GuildRoleStore.getSortedRoles(guildId);
         for (const role of allRoles) {
-            if (role && role.name && matchesKeyword(role.name, keywords) && !role.name.toLowerCase().includes("retired")) {
+            const lower = role?.name?.toLowerCase() ?? "";
+            if (role && role.name && matchesKeyword(role.name, keywords)
+                && !EXCLUDED_TERMS.some(t => lower.includes(t))) {
                 staffRoleIds.add(role.id);
                 roleIdToName.set(role.id, role.name);
             }

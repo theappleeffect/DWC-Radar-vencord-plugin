@@ -147,7 +147,7 @@ export function scanGuild(guildId: string, guildName: string, keywords: string[]
 
         const allRoles = GuildRoleStore.getSortedRoles(guildId);
         for (const role of allRoles) {
-            if (role && role.name && matchesKeyword(role.name, keywords)) {
+            if (role && role.name && matchesKeyword(role.name, keywords) && !role.name.toLowerCase().includes("retired")) {
                 staffRoleIds.add(role.id);
                 roleIdToName.set(role.id, role.name);
             }

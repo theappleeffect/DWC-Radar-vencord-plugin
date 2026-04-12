@@ -9,7 +9,7 @@ import { openModal } from "@utils/modal";
 import { GuildStore, Menu, showToast, Toasts } from "@webpack/common";
 
 import { DWCRadarModal } from "./DWCRadarPanel";
-import { extractInviteCode, loadStoredEntries, parseExcludedServers, parseKeywords, scanGuild } from "./store";
+import { extractInviteCode, leaveAllGuilds, loadStoredEntries, parseExcludedServers, parseKeywords, scanGuild } from "./store";
 
 import style from "./style.css?managed";
 
@@ -66,7 +66,8 @@ function joinNextInvite() {
             showToast(`Joined! ${lines.length - 1} invites remaining`, Toasts.Type.SUCCESS);
         }
     }).catch(() => {
-        showToast(`Invalid invite: ${lines[0]}`, Toasts.Type.FAILURE);
+        settings.store.inviteList = lines.slice(1).join("\n");
+        showToast(`Invalid invite removed: ${lines[0]}`, Toasts.Type.FAILURE);
     });
 }
 
@@ -105,6 +106,16 @@ const GuildContextMenuPatch: NavContextMenuPatchCallback = (children, { guild }:
                 scanGuild(guild.id, guild.name, keywords, excluded, getExcludedTerms());
                 openDWCRadarModal();
             }}
+        />
+    );
+
+    const leaveGroup = findGroupChildrenByChildId("leave-server", children);
+    (leaveGroup ?? group)?.push(
+        <Menu.MenuItem
+            id="vc-dwcradar-leave-all"
+            label="Leave All Servers"
+            color="danger"
+            action={() => leaveAllGuilds(excluded)}
         />
     );
 };

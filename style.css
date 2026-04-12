@@ -77,6 +77,50 @@
     color: var(--text-muted);
 }
 
+.vc-dwcradar-settings-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vc-dwcradar-settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vc-dwcradar-settings-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.vc-dwcradar-settings-input {
+    padding: 8px 10px;
+    background: var(--background-tertiary);
+    border: none;
+    border-radius: var(--radius-sm, 8px);
+    color: var(--text-default);
+    font-family: var(--font-primary);
+    font-size: 14px;
+    outline: none;
+}
+
+.vc-dwcradar-settings-input::placeholder {
+    color: var(--text-muted);
+}
+
+.vc-dwcradar-settings-builtin {
+    padding: 8px 10px;
+    background: var(--background-tertiary);
+    border-radius: var(--radius-sm, 8px);
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
 .vc-dwcradar-search {
     display: flex;
     align-items: center;

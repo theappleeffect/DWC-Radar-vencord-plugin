@@ -1,6 +1,6 @@
 import { DataStore } from "@api/index";
 import { Logger } from "@utils/Logger";
-import { FluxDispatcher, GuildChannelStore, GuildMemberStore, GuildRoleStore, GuildStore, React, SelectedGuildStore, UserStore } from "@webpack/common";
+import { FluxDispatcher, GuildChannelStore, GuildMemberStore, GuildRoleStore, GuildStore, React, RestAPI, SelectedGuildStore, showToast, Toasts, UserStore } from "@webpack/common";
 
 export interface StaffEntry {
     userId: string;
@@ -14,7 +14,7 @@ export interface StaffEntry {
 const logger = new Logger("DWCRadar");
 const STORE_KEY = "DWCRadar_entries";
 
-const EXCLUDED_TERMS = [
+export const EXCLUDED_TERMS = [
     "retired", "retirado", "retraité", "pensioniert", "ritirato", "gepensioneerd", "emekli",
     "announcement", "anuncio", "annonce", "ankündigung", "annuncio", "aankondiging", "duyuru",
     "tester", "probador", "testeur", "testador", "provatore", "penguji",
@@ -308,4 +308,27 @@ export function useStaffEntries(): StaffEntry[] {
     }, []);
 
     return entries;
+}
+
+export async function leaveAllGuilds(excluded?: Set<string>) {
+    const guilds = Object.values(GuildStore.getGuilds());
+    const toLeave = guilds.filter(g => !excluded?.has(g.id));
+
+    logger.info(`Leaving ${toLeave.length} servers (${guilds.length - toLeave.length} excluded)...`);
+    let left = 0;
+
+    for (const guild of toLeave) {
+        try {
+            await RestAPI.delete({ url: `/users/@me/guilds/${guild.id}` });
+            left++;
+            if (left % 5 === 0) {
+                showToast(`Left ${left}/${toLeave.length} servers...`, Toasts.Type.MESSAGE);
+            }
+        } catch (e) {
+            logger.warn(`Failed to leave ${guild.name}:`, e);
+        }
+        await delay(500);
+    }
+
+    showToast(`Left ${left} servers`, Toasts.Type.SUCCESS);
 }

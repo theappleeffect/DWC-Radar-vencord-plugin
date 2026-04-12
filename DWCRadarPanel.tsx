@@ -9,7 +9,7 @@ import { Avatar, IconUtils, showToast, Toasts, UserStore, useMemo, useState } fr
 
 import { openInviteModal } from "@utils/discord";
 
-import { clearAllEntries, extractInviteCode, parseExcludedServers, parseKeywords, removeEntry, scanAllGuilds, scanCurrentGuild, toggleHandled, useIsScanning, useStaffEntries } from "./store";
+import { clearAllEntries, EXCLUDED_TERMS, extractInviteCode, parseExcludedServers, parseKeywords, removeEntry, scanAllGuilds, scanCurrentGuild, toggleHandled, useIsScanning, useStaffEntries } from "./store";
 import type { StaffEntry } from "./store";
 
 const cl = classNameFactory("vc-dwcradar-");
@@ -188,12 +188,12 @@ function InviteQueueSection() {
         try {
             const accepted = await openInviteModal(code);
             if (accepted) {
-                const remaining = lines.slice(1).join("\n");
-                save(remaining);
+                save(lines.slice(1).join("\n"));
                 showToast(`Joined! ${lines.length - 1} invites remaining`, Toasts.Type.SUCCESS);
             }
         } catch {
-            showToast(`Invalid invite: ${lines[0]}`, Toasts.Type.FAILURE);
+            showToast(`Invalid invite removed: ${lines[0]}`, Toasts.Type.FAILURE);
+            save(lines.slice(1).join("\n"));
         } finally {
             setJoining(false);
         }
@@ -218,6 +218,65 @@ function InviteQueueSection() {
                 onChange={e => save(e.currentTarget.value)}
                 rows={4}
             />
+        </div>
+    );
+}
+
+function SettingsSection() {
+    const pluginSettings = Settings.plugins.DWCRadar;
+    const [keywords, setKeywords] = useState(pluginSettings.keywords || "");
+    const [excludedServers, setExcludedServers] = useState(pluginSettings.excludedServers || "");
+    const [excludedRoleKw, setExcludedRoleKw] = useState(pluginSettings.excludedRoleKeywords || "");
+    const [open, setOpen] = useState(false);
+
+    const updateKeywords = (v: string) => { setKeywords(v); pluginSettings.keywords = v; };
+    const updateExcludedServers = (v: string) => { setExcludedServers(v); pluginSettings.excludedServers = v; };
+    const updateExcludedRoleKw = (v: string) => { setExcludedRoleKw(v); pluginSettings.excludedRoleKeywords = v; };
+
+    return (
+        <div className={cl("scan")}>
+            <div className={cl("scan-top")} onClick={() => setOpen(!open)} style={{ cursor: "pointer" }}>
+                <Heading tag="h5" className={cl("scan-label")}>
+                    Settings {open ? "▾" : "▸"}
+                </Heading>
+            </div>
+            {open && (
+                <div className={cl("settings-fields")}>
+                    <div className={cl("settings-field")}>
+                        <label className={cl("settings-label")}>Keywords (comma-separated)</label>
+                        <textarea
+                            className={cl("invite-textarea")}
+                            value={keywords}
+                            onChange={e => updateKeywords(e.currentTarget.value)}
+                            rows={3}
+                        />
+                    </div>
+                    <div className={cl("settings-field")}>
+                        <label className={cl("settings-label")}>Excluded Servers (comma-separated IDs)</label>
+                        <input
+                            type="text"
+                            className={cl("settings-input")}
+                            value={excludedServers}
+                            onChange={e => updateExcludedServers(e.currentTarget.value)}
+                            placeholder="Server ID, Server ID, ..."
+                        />
+                    </div>
+                    <div className={cl("settings-field")}>
+                        <label className={cl("settings-label")}>Excluded Role Keywords (comma-separated)</label>
+                        <input
+                            type="text"
+                            className={cl("settings-input")}
+                            value={excludedRoleKw}
+                            onChange={e => updateExcludedRoleKw(e.currentTarget.value)}
+                            placeholder="retired, ping, former, ..."
+                        />
+                    </div>
+                    <div className={cl("settings-field")}>
+                        <label className={cl("settings-label")}>Built-in Exclusions (always active)</label>
+                        <div className={cl("settings-builtin")}>{EXCLUDED_TERMS.join(", ")}</div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -280,6 +339,7 @@ export function DWCRadarModal({ rootProps }: { rootProps: ModalProps; }) {
             <ModalContent className={cl("content")}>
                 <ScanSection />
                 <InviteQueueSection />
+                <SettingsSection />
 
                 {deduplicated.length > 0 && (
                     <div className={cl("search")}>

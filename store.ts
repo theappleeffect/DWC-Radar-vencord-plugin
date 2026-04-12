@@ -1,6 +1,6 @@
 import { DataStore } from "@api/index";
 import { Logger } from "@utils/Logger";
-import { GuildMemberStore, GuildRoleStore, GuildStore, React, SelectedGuildStore, UserStore } from "@webpack/common";
+import { FluxDispatcher, GuildChannelStore, GuildMemberStore, GuildRoleStore, GuildStore, React, SelectedGuildStore, UserStore } from "@webpack/common";
 
 export interface StaffEntry {
     userId: string;
@@ -97,6 +97,56 @@ export function parseKeywords(keywordSetting: string): string[] {
         .filter(k => k.length > 0);
 }
 
+export function extractInviteCode(raw: string): string {
+    return raw
+        .replace(/^https?:\/\/(www\.)?/i, "")
+        .replace(/^(discord\.gg|discord\.com\/invite)\//i, "")
+        .trim();
+}
+
+export function parseExcludedServers(setting: string): Set<string> {
+    return new Set(
+        setting.split(",").map(s => s.trim()).filter(s => s.length > 0)
+    );
+}
+
+function requestGuildMembers(guildId: string): Promise<void> {
+    return new Promise<void>(resolve => {
+        const defaultChannel = GuildChannelStore.getDefaultChannel(guildId);
+        if (!defaultChannel) {
+            resolve();
+            return;
+        }
+
+        const timeout = setTimeout(resolve, 3000);
+
+        const callback = (data: any) => {
+            if (data.guildId === guildId) {
+                FluxDispatcher.unsubscribe("GUILD_MEMBER_LIST_UPDATE", callback);
+                clearTimeout(timeout);
+                setTimeout(resolve, 200);
+            }
+        };
+
+        FluxDispatcher.subscribe("GUILD_MEMBER_LIST_UPDATE", callback);
+
+        FluxDispatcher.dispatch({
+            type: "GUILD_SUBSCRIPTIONS",
+            subscriptions: {
+                [guildId]: {
+                    channels: {
+                        [defaultChannel.id]: [[0, 99]],
+                    },
+                },
+            },
+        });
+    });
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function matchesKeyword(text: string, keywords: string[]): boolean {
     const lower = text.toLowerCase();
     return keywords.some(kw => lower.includes(kw));
@@ -123,6 +173,8 @@ function checkMember(
         }
     }
 
+    if (member.user?.bot) return false;
+
     if (matched) {
         const nickname = member.nick;
         const username = member.user?.username;
@@ -138,70 +190,113 @@ function checkMember(
     return false;
 }
 
-export function scanGuild(guildId: string, guildName: string, keywords: string[]): number {
-    if (scanning) return 0;
-    setScanning(true);
-
+function scanGuildInternal(guildId: string, guildName: string, keywords: string[], userExcludedTerms: string[] = []): number {
     let newCount = 0;
 
-    try {
-        const guild = GuildStore.getGuild(guildId);
-        if (!guild) {
-            logger.warn("Guild not found:", guildId);
-            return 0;
+    const guild = GuildStore.getGuild(guildId);
+    if (!guild) {
+        logger.warn("Guild not found:", guildId);
+        return 0;
+    }
+
+    const allExcluded = [...EXCLUDED_TERMS, ...userExcludedTerms];
+
+    const staffRoleIds = new Set<string>();
+    const roleIdToName = new Map<string, string>();
+
+    const allRoles = GuildRoleStore.getSortedRoles(guildId);
+    for (const role of allRoles) {
+        const lower = role?.name?.toLowerCase() ?? "";
+        if (role && role.name && matchesKeyword(role.name, keywords)
+            && !allExcluded.some(t => lower.includes(t))) {
+            staffRoleIds.add(role.id);
+            roleIdToName.set(role.id, role.name);
         }
+    }
 
-        const staffRoleIds = new Set<string>();
-        const roleIdToName = new Map<string, string>();
+    const memberIds: string[] = GuildMemberStore.getMemberIds(guildId) ?? [];
 
-        const allRoles = GuildRoleStore.getSortedRoles(guildId);
-        for (const role of allRoles) {
-            const lower = role?.name?.toLowerCase() ?? "";
-            if (role && role.name && matchesKeyword(role.name, keywords)
-                && !EXCLUDED_TERMS.some(t => lower.includes(t))) {
-                staffRoleIds.add(role.id);
-                roleIdToName.set(role.id, role.name);
-            }
+    for (const userId of memberIds) {
+        const cachedMember = GuildMemberStore.getMember(guildId, userId);
+        if (!cachedMember) continue;
+
+        const user = UserStore.getUser(userId);
+        const member = {
+            user: user ?? { id: userId, username: undefined },
+            roles: cachedMember.roles,
+            nick: cachedMember.nick,
+        };
+
+        if (checkMember(member, guildId, guildName, staffRoleIds, roleIdToName)) {
+            newCount++;
         }
-
-        logger.info(`Found ${staffRoleIds.size} matching roles in ${guildName}:`,
-            Array.from(roleIdToName.values()).join(", "));
-
-        const memberIds: string[] = GuildMemberStore.getMemberIds(guildId) ?? [];
-        logger.info(`Checking ${memberIds.length} cached members in ${guildName}`);
-
-        for (const userId of memberIds) {
-            const cachedMember = GuildMemberStore.getMember(guildId, userId);
-            if (!cachedMember) continue;
-
-            const user = UserStore.getUser(userId);
-            const member = {
-                user: user ?? { id: userId, username: undefined },
-                roles: cachedMember.roles,
-                nick: cachedMember.nick,
-            };
-
-            if (checkMember(member, guildId, guildName, staffRoleIds, roleIdToName)) {
-                newCount++;
-            }
-        }
-
-        logger.info(`Scan complete: ${newCount} new staff entries in ${guildName}`);
-    } finally {
-        setScanning(false);
     }
 
     return newCount;
 }
 
-export function scanCurrentGuild(keywords: string[]): number {
+export function scanGuild(guildId: string, guildName: string, keywords: string[], excluded?: Set<string>, userExcludedTerms?: string[]): number {
+    if (scanning) return 0;
+    if (excluded?.has(guildId)) return 0;
+    setScanning(true);
+
+    try {
+        const count = scanGuildInternal(guildId, guildName, keywords, userExcludedTerms);
+        logger.info(`Scan complete: ${count} new staff entries in ${guildName}`);
+        return count;
+    } finally {
+        setScanning(false);
+    }
+}
+
+export function scanCurrentGuild(keywords: string[], excluded?: Set<string>, userExcludedTerms?: string[]): number {
     const guildId = SelectedGuildStore.getGuildId();
     if (!guildId) return 0;
+    if (excluded?.has(guildId)) return 0;
 
     const guild = GuildStore.getGuild(guildId);
     const guildName = guild?.name ?? "Unknown Server";
 
-    return scanGuild(guildId, guildName, keywords);
+    return scanGuild(guildId, guildName, keywords, excluded, userExcludedTerms);
+}
+
+export async function scanAllGuilds(keywords: string[], excluded?: Set<string>, userExcludedTerms?: string[]): Promise<number> {
+    if (scanning) return 0;
+    setScanning(true);
+
+    let totalCount = 0;
+
+    try {
+        const guilds = GuildStore.getGuilds();
+        const guildList = Object.values(guilds);
+        logger.info(`Scanning ${guildList.length} servers...`);
+
+        for (const guild of guildList) {
+            if (excluded?.has(guild.id)) continue;
+
+            const beforeCount = GuildMemberStore.getMemberIds(guild.id)?.length ?? 0;
+            if (beforeCount < 10) {
+                await requestGuildMembers(guild.id);
+                await delay(500);
+            }
+
+            const afterCount = GuildMemberStore.getMemberIds(guild.id)?.length ?? 0;
+            logger.info(`${guild.name}: ${afterCount} members (was ${beforeCount})`);
+
+            let count = scanGuildInternal(guild.id, guild.name, keywords, userExcludedTerms);
+            if (count === 0 && afterCount > beforeCount) {
+                await delay(1000);
+                count = scanGuildInternal(guild.id, guild.name, keywords, userExcludedTerms);
+            }
+            if (count > 0) totalCount += count;
+        }
+
+        logger.info(`Scan all complete: ${totalCount} new staff entries across ${guildList.length} servers`);
+    } finally {
+        setScanning(false);
+    }
+
+    return totalCount;
 }
 
 export function useStaffEntries(): StaffEntry[] {

@@ -1,8 +1,3 @@
-#vc-notification-container .vc-notification-root {
-    transform: scale(0.7);
-    transform-origin: top right;
-}
-
 .vc-dwcradar-header {
     gap: 12px;
 }
@@ -62,6 +57,24 @@
 .vc-dwcradar-scan-actions {
     display: flex;
     gap: 8px;
+}
+
+.vc-dwcradar-invite-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 8px 10px;
+    background: var(--background-tertiary);
+    border: none;
+    border-radius: var(--radius-sm, 8px);
+    color: var(--text-default);
+    font-family: var(--font-code);
+    font-size: 13px;
+    resize: vertical;
+    outline: none;
+}
+
+.vc-dwcradar-invite-textarea::placeholder {
+    color: var(--text-muted);
 }
 
 .vc-dwcradar-search {
@@ -174,6 +187,25 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     line-height: 1.2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.vc-dwcradar-server-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--background-accent);
+    color: var(--white-500);
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+    cursor: default;
 }
 
 .vc-dwcradar-entry-roles {

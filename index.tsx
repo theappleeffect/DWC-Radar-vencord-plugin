@@ -4,19 +4,39 @@ import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/Co
 import { Notifications } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { IconComponent, OptionType } from "@utils/types";
+import { openInviteModal } from "@utils/discord";
 import { openModal } from "@utils/modal";
 import { GuildStore, Menu, showToast, Toasts } from "@webpack/common";
 
 import { DWCRadarModal } from "./DWCRadarPanel";
-import { loadStoredEntries, parseKeywords, scanGuild } from "./store";
+import { extractInviteCode, loadStoredEntries, parseExcludedServers, parseKeywords, scanGuild } from "./store";
 
 import style from "./style.css?managed";
+
+function getExcludedTerms(): string[] {
+    return parseKeywords(settings.store.excludedRoleKeywords);
+}
 
 const settings = definePluginSettings({
     keywords: {
         type: OptionType.STRING,
-        description: "Comma-separated keywords to match against role names and display names",
+        description: "Comma-separated keywords to match against role names",
         default: "Mod,Moderator,Moderation,Senior Moderator,Trial Mod,Admin,Administrator,Manager,Owner,Co-Owner,Helper,Staff,Jr. Staff,Sr. Staff,Head Staff,Senior Staff,Supervisor,Trainee,Dueño,Ayudante,Soporte,Personal,Jefe,Dono,Ajudante,Equipe,Suporte,Propriétaire,Aide,Personnel,Gérant,Besitzer,Leitung,Helfer,Personale,Proprietario,Eigenaar,Beheerder,Yönetici,Sahip,Yardımcı",
+    },
+    excludedServers: {
+        type: OptionType.STRING,
+        description: "Comma-separated server IDs to never scan (right-click a server > Copy Server ID)",
+        default: "",
+    },
+    excludedRoleKeywords: {
+        type: OptionType.STRING,
+        description: "Comma-separated keywords to exclude roles (e.g. retired,ping,former)",
+        default: "",
+    },
+    inviteList: {
+        type: OptionType.STRING,
+        description: "Invite links to join (one per line). Processed top-to-bottom.",
+        default: "",
     },
 });
 
@@ -30,6 +50,32 @@ const DWCRadarIcon: IconComponent = ({ height = 20, width = 20, className }) => 
         <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm-1-14h2v6h-2zm0 8h2v2h-2z" />
     </svg>
 );
+
+function joinNextInvite() {
+    const list = settings.store.inviteList || "";
+    const lines = list.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+    if (!lines.length) {
+        showToast("No invites in queue", Toasts.Type.MESSAGE);
+        return;
+    }
+
+    const code = extractInviteCode(lines[0]);
+    openInviteModal(code).then(accepted => {
+        if (accepted) {
+            settings.store.inviteList = lines.slice(1).join("\n");
+            showToast(`Joined! ${lines.length - 1} invites remaining`, Toasts.Type.SUCCESS);
+        }
+    }).catch(() => {
+        showToast(`Invalid invite: ${lines[0]}`, Toasts.Type.FAILURE);
+    });
+}
+
+function onKeydown(e: KeyboardEvent) {
+    if (e.altKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        joinNextInvite();
+    }
+}
 
 function openDWCRadarModal() {
     openModal(props => <DWCRadarModal rootProps={props} />);
@@ -46,6 +92,8 @@ const DWCRadarChatBarBtn: ChatBarButtonFactory = () => (
 
 const GuildContextMenuPatch: NavContextMenuPatchCallback = (children, { guild }: { guild: any; }) => {
     if (!guild) return;
+    const excluded = parseExcludedServers(settings.store.excludedServers);
+    if (excluded.has(guild.id)) return;
 
     const group = findGroupChildrenByChildId("privacy", children);
     group?.push(
@@ -54,7 +102,7 @@ const GuildContextMenuPatch: NavContextMenuPatchCallback = (children, { guild }:
             label="Scan for Staff"
             action={() => {
                 const keywords = parseKeywords(settings.store.keywords);
-                scanGuild(guild.id, guild.name, keywords);
+                scanGuild(guild.id, guild.name, keywords, excluded, getExcludedTerms());
                 openDWCRadarModal();
             }}
         />
@@ -86,10 +134,12 @@ export default definePlugin({
     async start() {
         await loadStoredEntries();
         addChatBarButton("DWCRadar", DWCRadarChatBarBtn, DWCRadarIcon);
+        document.addEventListener("keydown", onKeydown);
     },
 
     stop() {
         removeChatBarButton("DWCRadar");
+        document.removeEventListener("keydown", onKeydown);
     },
 
     flux: {
@@ -101,8 +151,11 @@ export default definePlugin({
             const guildName = guild?.name ?? "Unknown Server";
             if (!guildId) return;
 
+            const excluded = parseExcludedServers(settings.store.excludedServers);
+            if (excluded.has(guildId)) return;
+
             setTimeout(() => {
-                const count = scanGuild(guildId, guildName, keywords);
+                const count = scanGuild(guildId, guildName, keywords, excluded, getExcludedTerms());
                 if (count > 0) {
                     Notifications.showNotification({
                         title: "DWC Radar",

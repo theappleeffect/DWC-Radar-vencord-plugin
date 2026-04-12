@@ -7,10 +7,47 @@ import { classes } from "@utils/misc";
 import { ModalCloseButton, ModalContent, ModalHeader, ModalProps, ModalRoot, ModalSize } from "@utils/modal";
 import { Avatar, IconUtils, showToast, Toasts, UserStore, useMemo, useState } from "@webpack/common";
 
-import { clearAllEntries, parseKeywords, removeEntry, scanCurrentGuild, toggleHandled, useIsScanning, useStaffEntries } from "./store";
+import { openInviteModal } from "@utils/discord";
+
+import { clearAllEntries, extractInviteCode, parseExcludedServers, parseKeywords, removeEntry, scanAllGuilds, scanCurrentGuild, toggleHandled, useIsScanning, useStaffEntries } from "./store";
 import type { StaffEntry } from "./store";
 
 const cl = classNameFactory("vc-dwcradar-");
+
+interface DeduplicatedEntry {
+    userId: string;
+    username?: string;
+    roles: string[];
+    guilds: { guildId: string; guildName?: string; }[];
+    handled: boolean;
+}
+
+function deduplicateEntries(entries: StaffEntry[]): DeduplicatedEntry[] {
+    const map = new Map<string, DeduplicatedEntry>();
+
+    for (const e of entries) {
+        const existing = map.get(e.userId);
+        if (existing) {
+            if (!existing.guilds.some(g => g.guildId === e.guildId)) {
+                existing.guilds.push({ guildId: e.guildId, guildName: e.guildName });
+            }
+            for (const r of e.roles ?? []) {
+                if (!existing.roles.includes(r)) existing.roles.push(r);
+            }
+            existing.handled = existing.handled && !!e.handled;
+        } else {
+            map.set(e.userId, {
+                userId: e.userId,
+                username: e.username,
+                roles: [...(e.roles ?? [])],
+                guilds: [{ guildId: e.guildId, guildName: e.guildName }],
+                handled: !!e.handled,
+            });
+        }
+    }
+
+    return Array.from(map.values());
+}
 
 function UserAvatar({ userId }: { userId: string; }) {
     const user = UserStore.getUser(userId);
@@ -26,14 +63,27 @@ function UserAvatar({ userId }: { userId: string; }) {
     );
 }
 
-function StaffEntryRow({ entry }: { entry: StaffEntry; }) {
+function StaffEntryRow({ entry }: { entry: DeduplicatedEntry; }) {
     const copyId = () => {
         copyToClipboard(entry.userId);
         showToast(`Copied ${entry.userId}`, Toasts.Type.SUCCESS);
     };
 
+    const handleToggle = () => {
+        for (const g of entry.guilds) {
+            toggleHandled(entry.userId, g.guildId);
+        }
+    };
+
+    const handleRemove = () => {
+        for (const g of entry.guilds) {
+            removeEntry(entry.userId, g.guildId);
+        }
+    };
+
     const user = UserStore.getUser(entry.userId);
     const displayName = entry.username || user?.username || "Unknown";
+    const serverNames = entry.guilds.map(g => g.guildName ?? "Unknown").join(", ");
 
     return (
         <div className={classes(cl("entry"), entry.handled && cl("entry-handled"))}>
@@ -41,14 +91,21 @@ function StaffEntryRow({ entry }: { entry: StaffEntry; }) {
                 <input
                     type="checkbox"
                     className={cl("checkbox")}
-                    checked={!!entry.handled}
-                    onChange={() => toggleHandled(entry.userId, entry.guildId)}
+                    checked={entry.handled}
+                    onChange={handleToggle}
                     title={entry.handled ? "Mark as unhandled" : "Mark as handled"}
                 />
                 <UserAvatar userId={entry.userId} />
                 <div className={cl("entry-info")}>
-                    <span className={cl("entry-name")}>{displayName}</span>
-                    {entry.roles && entry.roles.length > 0 && (
+                    <span className={cl("entry-name")}>
+                        {displayName}
+                        {entry.guilds.length > 1 && (
+                            <span className={cl("server-badge")} title={serverNames}>
+                                {entry.guilds.length}
+                            </span>
+                        )}
+                    </span>
+                    {entry.roles.length > 0 && (
                         <span className={cl("entry-roles")}>{entry.roles.join(", ")}</span>
                     )}
                     <code className={cl("entry-id")}>{entry.userId}</code>
@@ -56,7 +113,7 @@ function StaffEntryRow({ entry }: { entry: StaffEntry; }) {
             </div>
             <div className={cl("entry-actions")}>
                 <Button variant="secondary" size="xs" onClick={copyId}>Copy</Button>
-                <Button variant="dangerSecondary" size="xs" onClick={() => removeEntry(entry.userId, entry.guildId)}>
+                <Button variant="dangerSecondary" size="xs" onClick={handleRemove}>
                     <svg width="14" height="14" viewBox="0 0 24 24"><path fill="currentColor" d="M18.4 4L12 10.4L5.6 4L4 5.6L10.4 12L4 18.4L5.6 20L12 13.6L18.4 20L20 18.4L13.6 12L20 5.6L18.4 4Z" /></svg>
                 </Button>
             </div>
@@ -70,9 +127,23 @@ function ScanSection() {
 
     const scan = () => {
         const keywords = parseKeywords(pluginSettings.keywords);
-        const count = scanCurrentGuild(keywords);
+        const excluded = parseExcludedServers(pluginSettings.excludedServers);
+        const excludedTerms = parseKeywords(pluginSettings.excludedRoleKeywords);
+        const count = scanCurrentGuild(keywords, excluded, excludedTerms);
         if (count > 0) {
             showToast(`Found ${count} new staff members`, Toasts.Type.SUCCESS);
+        } else {
+            showToast("No new staff members found", Toasts.Type.MESSAGE);
+        }
+    };
+
+    const scanAll = async () => {
+        const keywords = parseKeywords(pluginSettings.keywords);
+        const excluded = parseExcludedServers(pluginSettings.excludedServers);
+        const excludedTerms = parseKeywords(pluginSettings.excludedRoleKeywords);
+        const count = await scanAllGuilds(keywords, excluded, excludedTerms);
+        if (count > 0) {
+            showToast(`Found ${count} new staff members across all servers`, Toasts.Type.SUCCESS);
         } else {
             showToast("No new staff members found", Toasts.Type.MESSAGE);
         }
@@ -82,11 +153,14 @@ function ScanSection() {
         <div className={cl("scan")}>
             <div className={cl("scan-top")}>
                 <Heading tag="h5" className={cl("scan-label")}>
-                    {isScanning ? "Scanning..." : "Scan Server"}
+                    {isScanning ? "Scanning..." : "Scan"}
                 </Heading>
                 <div className={cl("scan-actions")}>
                     <Button variant="secondary" size="small" onClick={scan} disabled={isScanning}>
-                        {isScanning ? "Scanning..." : "Scan Current Server"}
+                        Current Server
+                    </Button>
+                    <Button variant="secondary" size="small" onClick={scanAll} disabled={isScanning}>
+                        All Servers
                     </Button>
                 </div>
             </div>
@@ -94,22 +168,78 @@ function ScanSection() {
     );
 }
 
+function InviteQueueSection() {
+    const pluginSettings = Settings.plugins.DWCRadar;
+    const [localList, setLocalList] = useState(pluginSettings.inviteList || "");
+    const [joining, setJoining] = useState(false);
+
+    const save = (val: string) => {
+        setLocalList(val);
+        pluginSettings.inviteList = val;
+    };
+
+    const lines = localList.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+
+    const joinNext = async () => {
+        if (!lines.length || joining) return;
+        setJoining(true);
+
+        const code = extractInviteCode(lines[0]);
+        try {
+            const accepted = await openInviteModal(code);
+            if (accepted) {
+                const remaining = lines.slice(1).join("\n");
+                save(remaining);
+                showToast(`Joined! ${lines.length - 1} invites remaining`, Toasts.Type.SUCCESS);
+            }
+        } catch {
+            showToast(`Invalid invite: ${lines[0]}`, Toasts.Type.FAILURE);
+        } finally {
+            setJoining(false);
+        }
+    };
+
+    return (
+        <div className={cl("scan")}>
+            <div className={cl("scan-top")}>
+                <Heading tag="h5" className={cl("scan-label")}>
+                    Invite Queue ({lines.length})
+                </Heading>
+                <div className={cl("scan-actions")}>
+                    <Button variant="primary" size="small" onClick={joinNext} disabled={!lines.length || joining}>
+                        {joining ? "Joining..." : "Join Next"}
+                    </Button>
+                </div>
+            </div>
+            <textarea
+                className={cl("invite-textarea")}
+                placeholder={"discord.gg/example\ndiscord.gg/example2\n..."}
+                value={localList}
+                onChange={e => save(e.currentTarget.value)}
+                rows={4}
+            />
+        </div>
+    );
+}
+
 export function DWCRadarModal({ rootProps }: { rootProps: ModalProps; }) {
-    const entries = useStaffEntries();
+    const rawEntries = useStaffEntries();
     const [search, setSearch] = useState("");
 
+    const deduplicated = useMemo(() => deduplicateEntries(rawEntries), [rawEntries]);
+
     const filtered = useMemo(() => {
-        if (!search.trim()) return entries;
+        if (!search.trim()) return deduplicated;
         const q = search.toLowerCase();
-        return entries.filter(e =>
+        return deduplicated.filter(e =>
             e.userId.includes(q) ||
             e.username?.toLowerCase().includes(q) ||
-            e.guildName?.toLowerCase().includes(q) ||
-            e.roles?.some(r => r.toLowerCase().includes(q))
+            e.guilds.some(g => g.guildName?.toLowerCase().includes(q)) ||
+            e.roles.some(r => r.toLowerCase().includes(q))
         );
-    }, [entries, search]);
+    }, [deduplicated, search]);
 
-    const unhandledCount = entries.filter(e => !e.handled).length;
+    const unhandledCount = deduplicated.filter(e => !e.handled).length;
 
     const copyDWC = () => {
         if (!filtered.length) return;
@@ -141,7 +271,7 @@ export function DWCRadarModal({ rootProps }: { rootProps: ModalProps; }) {
                     <Button variant="secondary" size="small" onClick={copyAllIds} disabled={!filtered.length}>
                         Copy IDs
                     </Button>
-                    <Button variant="dangerPrimary" size="small" onClick={clearAllEntries} disabled={!entries.length}>
+                    <Button variant="dangerPrimary" size="small" onClick={clearAllEntries} disabled={!deduplicated.length}>
                         Clear
                     </Button>
                 </div>
@@ -149,8 +279,9 @@ export function DWCRadarModal({ rootProps }: { rootProps: ModalProps; }) {
             </ModalHeader>
             <ModalContent className={cl("content")}>
                 <ScanSection />
+                <InviteQueueSection />
 
-                {entries.length > 0 && (
+                {deduplicated.length > 0 && (
                     <div className={cl("search")}>
                         <svg width="16" height="16" viewBox="0 0 24 24" className={cl("search-icon")}>
                             <path fill="currentColor" d="M21.707 20.293l-4.823-4.823A7.454 7.454 0 0 0 18.5 10.5a7.5 7.5 0 1 0-7.5 7.5 7.454 7.454 0 0 0 4.97-1.616l4.823 4.823a1 1 0 0 0 1.414-1.414zM10.5 16a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z" />
@@ -164,13 +295,13 @@ export function DWCRadarModal({ rootProps }: { rootProps: ModalProps; }) {
                         />
                         {search && (
                             <span className={cl("search-count")}>
-                                {filtered.length}/{entries.length}
+                                {filtered.length}/{deduplicated.length}
                             </span>
                         )}
                     </div>
                 )}
 
-                {entries.length === 0 ? (
+                {deduplicated.length === 0 ? (
                     <div className={cl("empty")}>
                         <svg width="48" height="48" viewBox="0 0 24 24" className={cl("empty-icon")}>
                             <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm1-12.5L9.04 9.46 7.6 8.04l-1.42 1.42 1.44 1.44L5.64 12.88l1.42 1.42 1.98-1.98 1.44 1.44 1.42-1.42-1.46-1.46 1.98-1.98L11 8.48l1.42-1.42L11 5.64 12.88 3.66 14.32 5.1l-1.98 1.98L13 7.5z" />
@@ -181,7 +312,7 @@ export function DWCRadarModal({ rootProps }: { rootProps: ModalProps; }) {
                 ) : (
                     <div className={cl("list")}>
                         {filtered.map(entry => (
-                            <StaffEntryRow key={`${entry.userId}-${entry.guildId}`} entry={entry} />
+                            <StaffEntryRow key={entry.userId} entry={entry} />
                         ))}
                         {filtered.length === 0 && search && (
                             <div className={cl("empty")}>
